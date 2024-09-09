@@ -48,7 +48,6 @@ void main(void) {
 
     for (;;) {
         DELAY_US(1000000);
-        LED_TOGGLE();
     }
 }
 
@@ -70,7 +69,7 @@ void scic_init(void) {
     EDIS;
 
     /* SCI initialize */
-
+    EALLOW;
     // data 8 bit
     ScicRegs.SCICCR.bit.SCICHAR = 0x07;
     // parity: no ~ disable
@@ -96,29 +95,29 @@ void scic_init(void) {
 
     /* SCI setup interrupt */
     ScicRegs.SCICTL2.bit.RXBKINTENA = 1;
-    ScicRegs.SCICTL2.bit.RXBKINTENA = 1;
+    ScicRegs.SCICTL2.bit.TXINTENA = 1;
 
     /* Relinquish SCI from Reset */
     ScicRegs.SCICTL1.bit.SWRESET = 1;
+    EDIS;
 
     EALLOW;
 
     // Enable CPU int8 and int9 which are connected to SCIs
     IER |= M_INT8;
-
     // Enable SCIRXINTC in the PIE: Group 8 interrupt 5
     PieCtrlRegs.PIEIER8.bit.INTx5 = 1;
     // Enable SCITXINTC in the PIE: Group 8 interrupt 6
     PieCtrlRegs.PIEIER8.bit.INTx6 = 1;
-
+    //Set my ISR to be run rather than the default.
+    PieVectTable.SCIRXINTC = &scic_rx_isr;
     // Enable global Interrupts and higher priority real-time debug events:
+    EDIS;
     EINT;   // Enable Global interrupt INTM
     ERTM;   // Enable Global realtime interrupt DBGM
 
-    //Set my ISR to be run rather than the default.
-    PieVectTable.SCIRXINTC = &scic_rx_isr;
-    EDIS;
 
+    scic_msg("hello \r\n");
 }
 
 // Transmit a character from the SCI
@@ -146,8 +145,9 @@ char scic_recv(void){
 
 
 interrupt void scic_rx_isr(void){
+    LED_TOGGLE();
     if (ScicRegs.SCIRXST.bit.RXRDY){
-
+        scic_msg("hello world \r\n");
         ScicRegs.SCIRXST.bit.RXRDY = 0;
         // Acknowledge this interrupt to receive more interrupts from group 8
         PieCtrlRegs.PIEACK.bit.ACK8 = 1;
