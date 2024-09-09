@@ -1,87 +1,149 @@
-/*
- * File     : main.c
- * Author   : hong xiem
- * Date     : 09-Sep, 2024
- */
-#include "binary.h"
-#include "DSP28x_Project.h"
 
-void Init_Gpio(void);
-void Init_PWM(void);
-void Put_PWM(u16 percent);
+/*
+*  File     : main.c
+*  Author   : hong xiem
+*  Date     : 09-Step, 2024
+*/
+
+#include "DSP28x_Project.h"     // Device Headerfile and Examples Include File
+
+// Prototype statements for functions found within this file.
+void InitEPwm1Example(void);
+__interrupt void epwm1_isr(void);
+// Configure the period for each timer
+#define EPWM1_TIMER_TBPRD  2000  // Period register
+#define EPWM1_MAX_CMPA     1950
+#define EPWM1_MIN_CMPA       50
+#define EPWM1_MAX_CMPB     1950
+#define EPWM1_MIN_CMPB       50
+
+// To keep track of which way the compare value is moving
+#define EPWM_CMP_UP   1
+#define EPWM_CMP_DOWN 0
 
 void main(void)
 {
-    InitSysCtrl();
-    DINT;
-    InitPieCtrl();
-    // Disable CPU interrupts and clear all CPU interrupt flags:
-    IER = 0x0000;
-    IFR = 0x0000;
-    InitPieVectTable();
-    // For this example, only initialize the Cpu Timers
-    InitCpuTimers();
-    #if (CPU_FRQ_150MHZ)
-        // Configure CPU-Timer 0, 1, and 2 to interrupt every second:
-        // 150MHz CPU Freq, 1 second Period (in uSeconds)
-        ConfigCpuTimer(&CpuTimer0, 150, 10000);
-        ConfigCpuTimer(&CpuTimer1, 150, 1000);
-        ConfigCpuTimer(&CpuTimer2, 150, 1000000);
-    #endif
+// Step 1. Initialize System Control:
+// PLL, WatchDog, enable Peripheral Clocks
+// This example function is found in the DSP2833x_SysCtrl.c file.
+   InitSysCtrl();
 
-    EALLOW;
-    GpioCtrlRegs.GPBMUX2.bit.GPIO48 = 0;
-    GpioCtrlRegs.GPBDIR.bit.GPIO48 = 1;
-    GpioCtrlRegs.GPBPUD.bit.GPIO48 = 0;
-    EDIS;
+// Step 2. Initialize GPIO:
+// This example function is found in the DSP2833x_Gpio.c file and
+// illustrates how to set the GPIO to it's default state.
+// InitGpio();  // Skipped for this example
 
-    Init_Gpio();
-    Init_PWM();
-    while(1)
-    {
-        Put_PWM(25);
-    }
+// For this case just init GPIO pins for ePWM1, ePWM2, ePWM3
+// These functions are in the DSP2833x_EPwm.c file
+   InitEPwm1Gpio();
+
+// Step 3. Clear all interrupts and initialize PIE vector table:
+// Disable CPU interrupts
+   DINT;
+
+// Initialize the PIE control registers to their default state.
+// The default state is all PIE interrupts disabled and flags
+// are cleared.
+// This function is found in the DSP2833x_PieCtrl.c file.
+   InitPieCtrl();
+
+// Disable CPU interrupts and clear all CPU interrupt flags:
+   IER = 0x0000;
+   IFR = 0x0000;
+
+// Initialize the PIE vector table with pointers to the shell Interrupt
+// Service Routines (ISR).
+// This will populate the entire table, even if the interrupt
+// is not used in this example.  This is useful for debug purposes.
+// The shell ISR routines are found in DSP2833x_DefaultIsr.c.
+// This function is found in DSP2833x_PieVect.c.
+   InitPieVectTable();
+
+// Interrupts that are used in this example are re-mapped to
+// ISR functions found within this file.
+   EALLOW;  // This is needed to write to EALLOW protected registers
+   PieVectTable.EPWM1_INT = &epwm1_isr;
+   EDIS;    // This is needed to disable write to EALLOW protected registers
+
+// Step 4. Initialize all the Device Peripherals:
+// This function is found in DSP2833x_InitPeripherals.c
+// InitPeripherals();  // Not required for this example
+
+// For this example, only initialize the ePWM
+
+   EALLOW;
+   SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 0;
+   EDIS;
+
+   InitEPwm1Example();
+
+   EALLOW;
+   SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 1;
+   EDIS;
+
+
+// Step 5. User specific code, enable interrupts:
+
+// Enable CPU INT3 which is connected to EPWM1-3 INT:
+   IER |= M_INT3;
+
+// Enable EPWM INTn in the PIE: Group 3 interrupt 1-3
+   PieCtrlRegs.PIEIER3.bit.INTx1 = 1;
+
+// Enable global Interrupts and higher priority real-time debug events:
+   EINT;   // Enable Global interrupt INTM
+   ERTM;   // Enable Global realtime interrupt DBGM
+
+// Step 6. IDLE loop. Just sit and loop forever (optional):
+   for(;;)
+   {
+       __asm("          NOP");
+   }
 }
 
-void Init_Gpio(void)
+__interrupt void epwm1_isr(void)
 {
-    EALLOW;
-    GpioCtrlRegs.GPAMUX1.bit.GPIO0  = 1;
-    GpioCtrlRegs.GPADIR.bit.GPIO0   = 1;
-    GpioCtrlRegs.GPAPUD.bit.GPIO0   = 1;
-    EDIS;
+   // Update the CMPA and CMPB values
 
+   // Clear INT flag for this timer
+   EPwm1Regs.ETCLR.bit.INT = 1;
+
+   // Acknowledge this interrupt to receive more interrupts from group 3
+   PieCtrlRegs.PIEACK.all = PIEACK_GROUP3;
 }
 
-void Init_PWM(void)
+void InitEPwm1Example()
 {
-    EALLOW;
-    SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 0;
-    EDIS;
+   // Setup TBCLK
+   EPwm1Regs.TBCTL.bit.CTRMODE = TB_COUNT_UP;   // Count up
+   EPwm1Regs.TBPRD = 7500;                      // Set timer period
+   EPwm1Regs.TBCTL.bit.PHSEN = TB_DISABLE;      // Disable phase loading
+   EPwm1Regs.TBPHS.half.TBPHS = 0x0000;         // Phase is 0
+   EPwm1Regs.TBCTR = 0x0000;                    // Clear counter
+   EPwm1Regs.TBCTL.bit.HSPCLKDIV = TB_DIV1;     // Clock ratio to SYSCLKOUT
+   EPwm1Regs.TBCTL.bit.CLKDIV = TB_DIV1;
 
-#if (CPU_FRQ_150MHZ)
-    EPwm1Regs.TBPRD             = 7500;             // Set timer period 801 TBCLKs
-#endif
-    EPwm1Regs.TBPHS.half.TBPHS  = 0x0000;           // Phase is 0
-    EPwm1Regs.TBCTR             = 0x0000;           // Clear counter
+   // Setup shadow register load on ZERO
+   EPwm1Regs.CMPCTL.bit.SHDWAMODE = CC_SHADOW;
+   EPwm1Regs.CMPCTL.bit.SHDWBMODE = CC_SHADOW;
+   EPwm1Regs.CMPCTL.bit.LOADAMODE = CC_CTR_ZERO;
+   EPwm1Regs.CMPCTL.bit.LOADBMODE = CC_CTR_ZERO;
 
-    EPwm1Regs.CMPA.half.CMPA    = 2500;             // Set compare A value
+   // Set Compare values
 
-    EPwm1Regs.TBCTL.bit.CTRMODE = 0x2;              // Count up-down
-    EPwm1Regs.TBCTL.bit.PHSEN   = 0;                // Disable phase loading
-    EPwm1Regs.TBCTL.bit.HSPCLKDIV = 0;              // Clock ratio to SYSCLKOUT
-    EPwm1Regs.TBCTL.bit.CLKDIV  = 0;
+   EPwm1Regs.CMPA.half.CMPA = 1700;             // Set compare A value
 
+   EPwm1Regs.CMPB = 1700;                       // Set Compare B value
 
-    EPwm1Regs.AQCTLA.bit.CAU    = 0x2;              // Set PWM1A on event A, up count
-    EPwm1Regs.AQCTLA.bit.CAD    = 0x1;              //Clear PWM1A on event A, down count
+   // Set actions
+   EPwm1Regs.AQCTLA.bit.ZRO = AQ_SET;           // Set PWM1A on Zero
+   EPwm1Regs.AQCTLA.bit.CAU = AQ_CLEAR;         // Clear PWM1A on event A, up count
 
-    EALLOW;
-    SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 1;
-    EDIS;
-}
+   EPwm1Regs.AQCTLB.bit.ZRO = AQ_CLEAR;           // Set PWM1B on Zero
+   EPwm1Regs.AQCTLB.bit.CBU = AQ_SET;         // Clear PWM1B on event B, up count
 
-void Put_PWM(u16 percent)
-{
-    EPwm1Regs.CMPA.half.CMPA    = 7500-(u16)percent*75;             // Set compare A value
+   // Interrupt where we will change the Compare Values
+   EPwm1Regs.ETSEL.bit.INTSEL = ET_CTR_ZERO;    // Select INT on Zero event
+   EPwm1Regs.ETSEL.bit.INTEN = 1;               // Enable INT
+   EPwm1Regs.ETPS.bit.INTPRD = ET_1ST;          // Generate INT on 3rd event
 }
