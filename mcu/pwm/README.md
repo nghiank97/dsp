@@ -1,5 +1,9 @@
 # 1. PWM
 
+##  Hardware
+
+![image info](./image/hardware.jpg)
+
 ##  PWM pinmap
 
 ```cpp
@@ -10,7 +14,6 @@
     EPWM3A is on GPIO4
     EPWM3B is on GPIO5
 ```
-
 ##  PWM in ossiloscope
 
 ![image info](./image/pwm.png)
